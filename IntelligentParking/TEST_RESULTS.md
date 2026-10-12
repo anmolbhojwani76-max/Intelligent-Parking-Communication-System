@@ -1,6 +1,8 @@
-# Verification record
+# Test results
 
 Verified on 12 October 2026 UTC (13 October in India), using Python 3.12 and headless Chromium on Linux.
+
+Source formatting and documentation were reviewed again after the GitHub upload. The five core tests and browser integration checks below passed again against the formatted repository. Python syntax-tree comparison confirmed that formatting did not change program behaviour. Local Markdown links were also checked.
 
 ## Passed
 

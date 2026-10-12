@@ -1,36 +1,6 @@
-# Intelligent Parking Communication System
+# Setup and usage
 
-Computer Networks project — SRM Institute of Science and Technology, Kattankulathur.
-
-This project monitors eight parking slots and shows their availability on a central dashboard. The aim is to help drivers find a free space without checking each slot themselves.
-
-Occupancy can come from a webcam or an automatic traffic simulation. The sensor sends readings through a TCP socket to a gateway, which publishes them using MQTT. The central server receives these updates and displays free, occupied and unknown slots.
-
-## Team
-
-| Name | Registration number |
-|---|---|
-| Anmol Bhojwani | RA2411026011395 |
-| Vedanth Dama | RA2411026011392 |
-| Adyant Behera | RA2411026011384 |
-| Mukunthan S | RA2411026011391 |
-| Shubham Gajanan Shinde | RA2411026011394 |
-
-**Faculty advisor:** Dr. Lakshmi Narayan  
-Assistant Professor, Department of Computational Intelligence
-
-## How it works
-
-The project uses four Computer Networks concepts:
-
-| Concept | Use in the project |
-|---|---|
-| Socket programming | Sends JSON readings from the sensor to the gateway over TCP. |
-| IoT | Uses a camera and sensor program to report changes in physical parking spaces. Simulation mode provides sample readings without a camera. |
-| MQTT | Passes readings from the gateway to the central server through a broker. |
-| Wireless networks | Connects the sensor laptop and server laptop over the same Wi-Fi network. |
-
-The dashboard suggests the first available slot in A01–A08 order. If reports stop arriving, slots become unknown after the last report expires. Unknown slots are excluded from suggestions.
+[Project overview and team](../README.md)
 
 ## Run on Windows
 

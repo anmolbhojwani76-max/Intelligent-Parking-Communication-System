@@ -1,8 +1,215 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Parking Central · Automatic Network</title><link rel="stylesheet" href="/style.css"></head><body><main><header><div><div class="eyebrow">Intelligent Parking Communication System</div><h1>Parking Central</h1><p>Automatic occupancy updates across a live TCP and MQTT network</p></div><div class="badge" id="mode">WAITING FOR SENSOR</div></header><div class="pipeline"><span>① <b>IoT sensor</b> detects occupancy</span><span>→</span><span>② <b>TCP gateway</b> validates messages</span><span>→</span><span>③ <b>MQTT broker</b> routes updates</span><span>→</span><span>④ <b>Central server</b> updates this view</span></div><section class="stats"><div class="metric">Available<strong id="free">—</strong></div><div class="metric">Occupied<strong id="occupied">—</strong></div><div class="metric">Unknown<strong id="unknown">—</strong></div><div class="metric">Reports received<strong id="reports">—</strong></div></section><div class="content"><div><section class="panel"><h2>Live parking area</h2><div class="slots" id="slots"></div><div class="road">← DRIVE AISLE →</div><div id="recommend" class="recommend" role="status">Waiting for a valid sensor report</div><p class="sub">Green = free · Coral = occupied · Dashed = unknown</p></section><section class="panel"><h2>Observed occupancy history</h2><canvas class="history" id="history" width="740" height="190"></canvas><p class="sub">Occupied slots: coral · Unknown slots: violet · Last 90 samples, at about 2-second intervals</p></section></div><div><section class="panel"><h2>Network evidence</h2><div class="network"><span>MQTT connection</span><b id="broker">—</b><span>Last report age</span><b id="age">—</b><span>Sensor sequence</span><b id="sequence">—</b><span>Duplicate / old reports</span><b id="duplicates">—</b></div><p class="sub">Topic: parking/v2/snapshot</p><pre id="payload">No payload received</pre><p class="sub" id="explain">The server only updates from subscribed MQTT messages.</p></section><section class="panel"><h2>Arrival and departure log</h2><div class="events"><table><thead><tr><th>Time</th><th>Slot</th><th>State</th></tr></thead><tbody id="events"></tbody></table></div></section></div></div><footer>Computer Networks · Team: Anmol Bhojwani, Vedanth Dama, Adyant Behera, Mukunthan S, Shubham Gajanan Shinde<br>Faculty advisor: Dr. Lakshmi Narayan · Sensor reports expire after 8 seconds. Recommendations do not reserve a slot.</footer></main><script>
-const $=id=>document.getElementById(id);const names=Array.from({length:8},(_,i)=>'A'+String(i+1).padStart(2,'0'));
-const car='<svg viewBox="0 0 48 78" height="70" aria-hidden="true"><rect x="9" y="3" width="30" height="72" rx="12" fill="#e3e9ff"/><rect x="13" y="17" width="22" height="19" rx="5" fill="#34335d"/><rect x="13" y="48" width="22" height="14" rx="4" fill="#34335d"/><rect x="5" y="15" width="5" height="14" rx="2" fill="#090e1b"/><rect x="38" y="15" width="5" height="14" rx="2" fill="#090e1b"/><rect x="5" y="49" width="5" height="14" rx="2" fill="#090e1b"/><rect x="38" y="49" width="5" height="14" rx="2" fill="#090e1b"/></svg>';
-$('slots').innerHTML=names.map(s=>`<div class="slot UNKNOWN" id="${s}"><b>${s}</b><div class="car">${car}</div><small>UNKNOWN</small></div>`).join('');
-function draw(h){let c=$('history'),x=c.getContext('2d'),w=c.width,k=c.height;x.clearRect(0,0,w,k);x.font='14px Segoe UI';for(let n=0;n<=8;n+=2){let y=15+(8-n)*17;x.strokeStyle='#303b56';x.beginPath();x.moveTo(32,y);x.lineTo(w-8,y);x.stroke();x.fillStyle='#acb9d4';x.fillText(n,9,y+5)}for(const [key,col]of[['OCCUPIED','#ff9b86'],['UNKNOWN','#bca6ff']]){x.strokeStyle=col;x.lineWidth=3;x.beginPath();h.forEach((v,i)=>{let px=34+i*(w-46)/Math.max(1,h.length-1),py=15+(8-v[key])*17;i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke()}if(h.length){x.fillStyle='#acb9d4';x.fillText(h[0].time,34,179);x.fillText(h[h.length-1].time,w-78,179)}}
-function unknown(){for(const s of names){$(s).className='slot UNKNOWN';$(s).querySelector('small').textContent='UNKNOWN'}for(const id of ['free','occupied','unknown','reports'])$(id).textContent='—';$('mode').textContent='SERVER UNAVAILABLE';$('recommend').textContent='No confirmed availability. Restore the server connection.';$('broker').textContent='Unknown';$('age').textContent='—';$('sequence').textContent='—';$('duplicates').textContent='—';$('payload').textContent='Connection lost';}
-async function refresh(){try{const r=await fetch('/api/state');if(!r.ok)throw Error();const d=await r.json();for(const key of ['free','occupied','unknown'])$(key).textContent=d.counts[key.toUpperCase()];$('reports').textContent=d.messages;$('mode').textContent=(d.source==='camera'?'CAMERA DETECTION':d.source==='simulation'?'AUTOMATIC SIMULATION':'WAITING FOR SENSOR')+(d.live?' · LIVE':' · NO FRESH DATA');for(const s of d.slots){$(s.slot).className='slot '+s.status;$(s.slot).querySelector('small').textContent=s.status}$('recommend').textContent=d.recommendation?'Suggested space: '+d.recommendation:d.counts.UNKNOWN?'Availability uncertain. Sensor reports are missing.':'Parking full. Waiting for a departure.';$('broker').textContent=d.broker?'Connected':'Disconnected';$('age').textContent=d.age===null?'No report':d.age+' s';$('sequence').textContent=d.seq;$('duplicates').textContent=d.duplicates;$('payload').textContent=JSON.stringify(d.payload,null,2);$('events').innerHTML=d.events.map(e=>`<tr><td>${e.time}</td><td>${e.slot}</td><td>${e.state}</td></tr>`).join('');draw(d.history);$('explain').textContent=d.source==='camera'?'Camera images stay on the sensor laptop. Only occupancy states travel through the network.':'Simulated vehicles change automatically. These are synthetic sensor readings, transmitted through real TCP and MQTT.'}catch(e){unknown()}finally{setTimeout(refresh,1000)}}refresh();
-</script></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Parking Central · Automatic Network</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">Intelligent Parking Communication System</div>
+          <h1>Parking Central</h1>
+          <p>Automatic occupancy updates across a live TCP and MQTT network</p>
+        </div>
+        <div class="badge" id="mode">WAITING FOR SENSOR</div>
+      </header>
+      <div class="pipeline">
+        <span>① <b>IoT sensor</b> detects occupancy</span><span>→</span
+        ><span>② <b>TCP gateway</b> validates messages</span><span>→</span
+        ><span>③ <b>MQTT broker</b> routes updates</span><span>→</span
+        ><span>④ <b>Central server</b> updates this view</span>
+      </div>
+      <section class="stats">
+        <div class="metric">Available<strong id="free">—</strong></div>
+        <div class="metric">Occupied<strong id="occupied">—</strong></div>
+        <div class="metric">Unknown<strong id="unknown">—</strong></div>
+        <div class="metric">
+          Reports received<strong id="reports">—</strong>
+        </div>
+      </section>
+      <div class="content">
+        <div>
+          <section class="panel">
+            <h2>Live parking area</h2>
+            <div class="slots" id="slots"></div>
+            <div class="road">← DRIVE AISLE →</div>
+            <div id="recommend" class="recommend" role="status">
+              Waiting for a valid sensor report
+            </div>
+            <p class="sub">
+              Green = free · Coral = occupied · Dashed = unknown
+            </p>
+          </section>
+          <section class="panel">
+            <h2>Observed occupancy history</h2>
+            <canvas
+              class="history"
+              id="history"
+              width="740"
+              height="190"
+            ></canvas>
+            <p class="sub">
+              Occupied slots: coral · Unknown slots: violet · Last 90 samples,
+              at about 2-second intervals
+            </p>
+          </section>
+        </div>
+        <div>
+          <section class="panel">
+            <h2>Network evidence</h2>
+            <div class="network">
+              <span>MQTT connection</span><b id="broker">—</b
+              ><span>Last report age</span><b id="age">—</b
+              ><span>Sensor sequence</span><b id="sequence">—</b
+              ><span>Duplicate / old reports</span><b id="duplicates">—</b>
+            </div>
+            <p class="sub">Topic: parking/v2/snapshot</p>
+            <pre id="payload">No payload received</pre>
+            <p class="sub" id="explain">
+              The server only updates from subscribed MQTT messages.
+            </p>
+          </section>
+          <section class="panel">
+            <h2>Arrival and departure log</h2>
+            <div class="events">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Slot</th>
+                    <th>State</th>
+                  </tr>
+                </thead>
+                <tbody id="events"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
+      <footer>
+        Computer Networks · Team: Anmol Bhojwani, Vedanth Dama, Adyant Behera,
+        Mukunthan S, Shubham Gajanan Shinde<br />Faculty advisor: Dr. Lakshmi
+        Narayan · Sensor reports expire after 8 seconds. Recommendations do not
+        reserve a slot.
+      </footer>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const names = Array.from(
+        { length: 8 },
+        (_, i) => "A" + String(i + 1).padStart(2, "0"),
+      );
+      const car =
+        '<svg viewBox="0 0 48 78" height="70" aria-hidden="true"><rect x="9" y="3" width="30" height="72" rx="12" fill="#e3e9ff"/><rect x="13" y="17" width="22" height="19" rx="5" fill="#34335d"/><rect x="13" y="48" width="22" height="14" rx="4" fill="#34335d"/><rect x="5" y="15" width="5" height="14" rx="2" fill="#090e1b"/><rect x="38" y="15" width="5" height="14" rx="2" fill="#090e1b"/><rect x="5" y="49" width="5" height="14" rx="2" fill="#090e1b"/><rect x="38" y="49" width="5" height="14" rx="2" fill="#090e1b"/></svg>';
+      $("slots").innerHTML = names
+        .map(
+          (s) =>
+            `<div class="slot UNKNOWN" id="${s}"><b>${s}</b><div class="car">${car}</div><small>UNKNOWN</small></div>`,
+        )
+        .join("");
+      function draw(h) {
+        let c = $("history"),
+          x = c.getContext("2d"),
+          w = c.width,
+          k = c.height;
+        x.clearRect(0, 0, w, k);
+        x.font = "14px Segoe UI";
+        for (let n = 0; n <= 8; n += 2) {
+          let y = 15 + (8 - n) * 17;
+          x.strokeStyle = "#303b56";
+          x.beginPath();
+          x.moveTo(32, y);
+          x.lineTo(w - 8, y);
+          x.stroke();
+          x.fillStyle = "#acb9d4";
+          x.fillText(n, 9, y + 5);
+        }
+        for (const [key, col] of [
+          ["OCCUPIED", "#ff9b86"],
+          ["UNKNOWN", "#bca6ff"],
+        ]) {
+          x.strokeStyle = col;
+          x.lineWidth = 3;
+          x.beginPath();
+          h.forEach((v, i) => {
+            let px = 34 + (i * (w - 46)) / Math.max(1, h.length - 1),
+              py = 15 + (8 - v[key]) * 17;
+            i ? x.lineTo(px, py) : x.moveTo(px, py);
+          });
+          x.stroke();
+        }
+        if (h.length) {
+          x.fillStyle = "#acb9d4";
+          x.fillText(h[0].time, 34, 179);
+          x.fillText(h[h.length - 1].time, w - 78, 179);
+        }
+      }
+      function unknown() {
+        for (const s of names) {
+          $(s).className = "slot UNKNOWN";
+          $(s).querySelector("small").textContent = "UNKNOWN";
+        }
+        for (const id of ["free", "occupied", "unknown", "reports"])
+          $(id).textContent = "—";
+        $("mode").textContent = "SERVER UNAVAILABLE";
+        $("recommend").textContent =
+          "No confirmed availability. Restore the server connection.";
+        $("broker").textContent = "Unknown";
+        $("age").textContent = "—";
+        $("sequence").textContent = "—";
+        $("duplicates").textContent = "—";
+        $("payload").textContent = "Connection lost";
+      }
+      async function refresh() {
+        try {
+          const r = await fetch("/api/state");
+          if (!r.ok) throw Error();
+          const d = await r.json();
+          for (const key of ["free", "occupied", "unknown"])
+            $(key).textContent = d.counts[key.toUpperCase()];
+          $("reports").textContent = d.messages;
+          $("mode").textContent =
+            (d.source === "camera"
+              ? "CAMERA DETECTION"
+              : d.source === "simulation"
+                ? "AUTOMATIC SIMULATION"
+                : "WAITING FOR SENSOR") +
+            (d.live ? " · LIVE" : " · NO FRESH DATA");
+          for (const s of d.slots) {
+            $(s.slot).className = "slot " + s.status;
+            $(s.slot).querySelector("small").textContent = s.status;
+          }
+          $("recommend").textContent = d.recommendation
+            ? "Suggested space: " + d.recommendation
+            : d.counts.UNKNOWN
+              ? "Availability uncertain. Sensor reports are missing."
+              : "Parking full. Waiting for a departure.";
+          $("broker").textContent = d.broker ? "Connected" : "Disconnected";
+          $("age").textContent = d.age === null ? "No report" : d.age + " s";
+          $("sequence").textContent = d.seq;
+          $("duplicates").textContent = d.duplicates;
+          $("payload").textContent = JSON.stringify(d.payload, null, 2);
+          $("events").innerHTML = d.events
+            .map(
+              (e) =>
+                `<tr><td>${e.time}</td><td>${e.slot}</td><td>${e.state}</td></tr>`,
+            )
+            .join("");
+          draw(d.history);
+          $("explain").textContent =
+            d.source === "camera"
+              ? "Camera images stay on the sensor laptop. Only occupancy states travel through the network."
+              : "Simulated vehicles change automatically. These are synthetic sensor readings, transmitted through real TCP and MQTT.";
+        } catch (e) {
+          unknown();
+        } finally {
+          setTimeout(refresh, 1000);
+        }
+      }
+      refresh();
+    </script>
+  </body>
+</html>

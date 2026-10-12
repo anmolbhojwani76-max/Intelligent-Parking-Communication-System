@@ -35,7 +35,7 @@ Simulation starts automatically. To use a webcam, select **Camera detection** on
 
 Keep the terminal open while running the project. Press **Ctrl+C** to stop it.
 
-[Setup instructions, Wi-Fi connection and troubleshooting](IntelligentParking/README.md)
+[Setup instructions, Wi-Fi connection and troubleshooting](IntelligentParking/README.md) · [Demo notes](IntelligentParking/FACULTY_GUIDE.md)
 
 ## Team
 

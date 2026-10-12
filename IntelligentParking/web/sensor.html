@@ -1,19 +1,426 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>IoT Sensor Station</title><link rel="stylesheet" href="/style.css"></head><body><main><header><div><div class="eyebrow">IoT sensing · Automatic detection</div><h1>Sensor Station</h1><p>Choose a sensing source. Occupancy updates travel through TCP and MQTT.</p></div><div class="badge" id="mode">AUTOMATIC SIMULATION</div></header><section class="toolbar"><button class="primary" id="simulation">Automatic simulation</button><button id="camera">Camera detection</button><button id="pause">Pause transmission</button></section><div class="status" id="status" role="status">Connecting…</div><section class="panel" id="simulationPanel"><h2>Automatic traffic is running</h2><div class="sim" id="cycle">0 / 80 s</div><p>Eight vehicles arrive one by one, remain parked, then leave. This repeating scenario sends real network messages without any manual slot changes.</p><p><strong>0–40 seconds:</strong> gradual arrivals. <strong>40–50 seconds:</strong> full parking. <strong>50–71 seconds:</strong> departures. <strong>80 seconds:</strong> next cycle.</p><p class="warning">This mode generates synthetic sensor readings. Use Camera detection to sense physical objects.</p></section><section id="cameraPanel" class="hidden"><div class="content"><section class="panel"><h2>Live camera and parking zones</h2><div class="view"><video id="video" autoplay muted playsinline></video><canvas id="overlay" width="640" height="480"></canvas></div><div class="toolbar"><button id="enable">Enable camera</button><button id="clear">Draw custom zones</button><button id="grid">Use 8-slot grid</button><button id="calibrate">Capture empty reference</button><button class="primary" id="detect">Start detection</button><button id="stop">Stop detection</button></div><label>Occupancy threshold <input id="threshold" type="range" min="5" max="45" value="15"> <span id="thresholdValue">15%</span></label><div id="cameraStatus" role="status" class="status">Enable the camera, position your layout, then capture an empty reference.</div></section><section class="panel"><h2>One-time setup</h2><ol class="instructions"><li>Point a fixed webcam at a paper or cardboard parking layout. Keep the camera and lighting steady.</li><li>Align eight spaces with the displayed grid, or choose Draw custom zones and drag eight rectangles in A01–A08 order.</li><li>Remove all objects, then choose Capture empty reference.</li><li>Choose Start detection. Place a toy car or another object inside a marked space.</li><li>The program detects sustained changes and transmits occupancy automatically. Keep this camera tab visible.</li></ol><p class="warning">This detects visual occupancy / obstruction, not the identity of a car. Shadows, camera movement and major lighting changes can cause errors.</p><p>Camera frames stay in this browser. The sensor agent sends only eight Boolean occupancy readings.</p><p>Changing the zones requires a new empty reference. Closing or hiding the camera tab stops fresh camera reports.</p></section></div></section><footer>Sensor controls are local to this laptop. For a Wi-Fi demonstration, run this agent on the camera laptop and point it at the gateway laptop’s IPv4 address.<br>Use the separate central dashboard at port 8090 to show the received results.</footer></main><script src="/vision.js"></script><script>
-const $=id=>document.getElementById(id),video=$('video'),overlay=$('overlay'),ctx=overlay.getContext('2d');const sample=document.createElement('canvas');sample.width=320;sample.height=240;const sx=sample.getContext('2d',{willReadFrequently:true});let zones=[],baseline=null,stream=null,running=false,drawing=false,startPoint=null,states=Array(8).fill(false),candidate=Array(8).fill(false),streak=Array(8).fill(0),ratios=Array(8).fill(0),token=null,frames=0,processing=false,lastPost=0,lastVideo=-1,lastFrameAt=0;
-function defaults(){zones=Array.from({length:8},(_,i)=>({x:.03+(i%4)*.245,y:.12+Math.floor(i/4)*.45,w:.205,h:.30}));invalidate();paint()}
-function invalidate(){running=false;baseline=null;states=Array(8).fill(false);candidate=Array(8).fill(false);streak=Array(8).fill(0);ratios=Array(8).fill(0);frames=0}
-function paint(preview){ctx.clearRect(0,0,640,480);zones.forEach((z,i)=>{ctx.strokeStyle=running?(states[i]?'#ff947e':'#57e2c1'):'#bca6ff';ctx.lineWidth=3;ctx.strokeRect(z.x*640,z.y*480,z.w*640,z.h*480);ctx.fillStyle='#0d1121dd';ctx.fillRect(z.x*640,z.y*480,110,24);ctx.fillStyle='#fff';ctx.font='14px Arial';ctx.fillText('A0'+(i+1)+(running?' '+Math.round(ratios[i]*100)+'%':''),z.x*640+5,z.y*480+17)});if(preview){ctx.strokeStyle='#fff';ctx.strokeRect(preview.x*640,preview.y*480,preview.w*640,preview.h*480)}}
-async function post(path,data){let r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw Error('Sensor agent rejected the request');return r.json()}
-function cameraMessage(t){$('cameraStatus').textContent=t}
-async function choose(mode){try{running=false;const d=await post('/api/mode',{mode});token=d.token;$('simulationPanel').classList.toggle('hidden',mode!=='simulation');$('cameraPanel').classList.toggle('hidden',mode!=='camera');if(mode==='simulation'&&stream){stream.getTracks().forEach(t=>t.stop());stream=null;baseline=null}cameraMessage('Enable the camera, position your layout, then capture an empty reference.')}catch(e){$('status').textContent=e.message}}
-$('simulation').onclick=()=>choose('simulation');$('camera').onclick=()=>choose('camera');$('pause').onclick=()=>post('/api/pause',{}).catch(e=>$('status').textContent=e.message);
-$('enable').onclick=async()=>{try{if(!navigator.mediaDevices)throw Error('Use http://127.0.0.1:8091 on this laptop to enable camera access.');if(stream)stream.getTracks().forEach(t=>t.stop());invalidate();stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480},audio:false});video.srcObject=stream;await video.play();stream.getVideoTracks()[0].onended=()=>{invalidate();cameraMessage('Camera disconnected. Reconnect and capture a new empty reference.')};cameraMessage('Camera ready. Keep all zones empty and capture the reference.')}catch(e){cameraMessage(e.name+': '+e.message)}};
-$('grid').onclick=()=>{drawing=false;defaults();cameraMessage('Grid restored. Capture a new empty reference.')};$('clear').onclick=()=>{zones=[];drawing=true;invalidate();paint();cameraMessage('Drag eight rectangles around empty slots in A01–A08 order.')};
-function point(e){let r=overlay.getBoundingClientRect();return{x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))}}
-function rect(a,b){return{x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),w:Math.abs(a.x-b.x),h:Math.abs(a.y-b.y)}}
-overlay.onpointerdown=e=>{if(!drawing||zones.length>=8)return;startPoint=point(e);overlay.setPointerCapture(e.pointerId)};overlay.onpointermove=e=>{if(startPoint)paint(rect(startPoint,point(e)))};overlay.onpointerup=e=>{if(!startPoint)return;let z=rect(startPoint,point(e));startPoint=null;if(z.w>.03&&z.h>.03)zones.push(z);paint();cameraMessage(zones.length===8?'Eight zones ready. Capture an empty reference.':`Zones drawn: ${zones.length}/8`)};
-$('calibrate').onclick=()=>{if(!stream||video.readyState<2||zones.length!==8){cameraMessage('Enable the camera and define exactly eight zones first.');return}invalidate();sx.drawImage(video,0,0,320,240);baseline=new Uint8ClampedArray(sx.getImageData(0,0,320,240).data);cameraMessage('Empty reference saved. Start detection, then place a vehicle in a slot.');paint()};
-$('detect').onclick=()=>{if(!baseline||!stream||!token){cameraMessage('Choose Camera detection, enable the camera and capture an empty reference first.');return}running=true;frames=0;lastPost=0;lastVideo=-1;lastFrameAt=performance.now();cameraMessage('Automatic detection running. No manual occupancy clicks needed.')};$('stop').onclick=()=>{running=false;cameraMessage('Detection stopped. The server will expire the last readings.')};$('threshold').oninput=()=>{$('thresholdValue').textContent=$('threshold').value+'%'};
-async function tick(){if(processing)return;processing=true;try{if(running&&!document.hidden&&stream&&stream.getVideoTracks()[0].readyState==='live'&&video.readyState>=2){const now=performance.now();if(video.currentTime!==lastVideo){lastVideo=video.currentTime;lastFrameAt=now;sx.drawImage(video,0,0,320,240);ratios=ParkingVision.scores(sx.getImageData(0,0,320,240).data,baseline,320,240,zones);states=ParkingVision.stabilize(states,candidate,streak,ratios,Number($('threshold').value)/100);frames++;paint();if(frames>=4&&now-lastPost>=500){await post('/api/camera',{token,slots:Object.fromEntries(states.map((s,i)=>['A0'+(i+1),s]))});lastPost=now}}else if(now-lastFrameAt>1500){cameraMessage('Camera frames stopped. Fresh reports are paused.')}}}catch(e){running=false;cameraMessage('Detection paused: '+e.message)}finally{processing=false}}setInterval(tick,200);
-async function refresh(){try{let r=await fetch('/api/state');if(!r.ok)throw Error();let d=await r.json();$('mode').textContent=d.mode==='camera'?'CAMERA DETECTION':'AUTOMATIC SIMULATION';$('status').textContent=d.status;$('cycle').textContent=d.cycle+' / 80 s';$('pause').textContent=d.paused?'Resume transmission':'Pause transmission';if(d.mode==='simulation'&&running)running=false;}catch(e){$('status').textContent='Sensor agent unavailable'}finally{setTimeout(refresh,1000)}}defaults();refresh();
-</script></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IoT Sensor Station</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">IoT sensing · Automatic detection</div>
+          <h1>Sensor Station</h1>
+          <p>
+            Choose a sensing source. Occupancy updates travel through TCP and
+            MQTT.
+          </p>
+        </div>
+        <div class="badge" id="mode">AUTOMATIC SIMULATION</div>
+      </header>
+      <section class="toolbar">
+        <button class="primary" id="simulation">Automatic simulation</button
+        ><button id="camera">Camera detection</button
+        ><button id="pause">Pause transmission</button>
+      </section>
+      <div class="status" id="status" role="status">Connecting…</div>
+      <section class="panel" id="simulationPanel">
+        <h2>Automatic traffic is running</h2>
+        <div class="sim" id="cycle">0 / 80 s</div>
+        <p>
+          Eight vehicles arrive one by one, remain parked, then leave. This
+          repeating scenario sends real network messages without any manual slot
+          changes.
+        </p>
+        <p>
+          <strong>0–40 seconds:</strong> gradual arrivals.
+          <strong>40–50 seconds:</strong> full parking.
+          <strong>50–71 seconds:</strong> departures.
+          <strong>80 seconds:</strong> next cycle.
+        </p>
+        <p class="warning">
+          This mode generates synthetic sensor readings. Use Camera detection to
+          sense physical objects.
+        </p>
+      </section>
+      <section id="cameraPanel" class="hidden">
+        <div class="content">
+          <section class="panel">
+            <h2>Live camera and parking zones</h2>
+            <div class="view">
+              <video id="video" autoplay muted playsinline></video
+              ><canvas id="overlay" width="640" height="480"></canvas>
+            </div>
+            <div class="toolbar">
+              <button id="enable">Enable camera</button
+              ><button id="clear">Draw custom zones</button
+              ><button id="grid">Use 8-slot grid</button
+              ><button id="calibrate">Capture empty reference</button
+              ><button class="primary" id="detect">Start detection</button
+              ><button id="stop">Stop detection</button>
+            </div>
+            <label
+              >Occupancy threshold
+              <input id="threshold" type="range" min="5" max="45" value="15" />
+              <span id="thresholdValue">15%</span></label
+            >
+            <div id="cameraStatus" role="status" class="status">
+              Enable the camera, position your layout, then capture an empty
+              reference.
+            </div>
+          </section>
+          <section class="panel">
+            <h2>One-time setup</h2>
+            <ol class="instructions">
+              <li>
+                Point a fixed webcam at a paper or cardboard parking layout.
+                Keep the camera and lighting steady.
+              </li>
+              <li>
+                Align eight spaces with the displayed grid, or choose Draw
+                custom zones and drag eight rectangles in A01–A08 order.
+              </li>
+              <li>Remove all objects, then choose Capture empty reference.</li>
+              <li>
+                Choose Start detection. Place a toy car or another object inside
+                a marked space.
+              </li>
+              <li>
+                The program detects sustained changes and transmits occupancy
+                automatically. Keep this camera tab visible.
+              </li>
+            </ol>
+            <p class="warning">
+              This detects visual occupancy / obstruction, not the identity of a
+              car. Shadows, camera movement and major lighting changes can cause
+              errors.
+            </p>
+            <p>
+              Camera frames stay in this browser. The sensor agent sends only
+              eight Boolean occupancy readings.
+            </p>
+            <p>
+              Changing the zones requires a new empty reference. Closing or
+              hiding the camera tab stops fresh camera reports.
+            </p>
+          </section>
+        </div>
+      </section>
+      <footer>
+        Sensor controls are local to this laptop. For a Wi-Fi demonstration, run
+        this agent on the camera laptop and point it at the gateway laptop’s
+        IPv4 address.<br />Use the separate central dashboard at port 8090 to
+        show the received results.
+      </footer>
+    </main>
+    <script src="/vision.js"></script>
+    <script>
+      const $ = (id) => document.getElementById(id),
+        video = $("video"),
+        overlay = $("overlay"),
+        ctx = overlay.getContext("2d");
+      const sample = document.createElement("canvas");
+      sample.width = 320;
+      sample.height = 240;
+      const sx = sample.getContext("2d", { willReadFrequently: true });
+      let zones = [],
+        baseline = null,
+        stream = null,
+        running = false,
+        drawing = false,
+        startPoint = null,
+        states = Array(8).fill(false),
+        candidate = Array(8).fill(false),
+        streak = Array(8).fill(0),
+        ratios = Array(8).fill(0),
+        token = null,
+        frames = 0,
+        processing = false,
+        lastPost = 0,
+        lastVideo = -1,
+        lastFrameAt = 0;
+      function defaults() {
+        zones = Array.from({ length: 8 }, (_, i) => ({
+          x: 0.03 + (i % 4) * 0.245,
+          y: 0.12 + Math.floor(i / 4) * 0.45,
+          w: 0.205,
+          h: 0.3,
+        }));
+        invalidate();
+        paint();
+      }
+      function invalidate() {
+        running = false;
+        baseline = null;
+        states = Array(8).fill(false);
+        candidate = Array(8).fill(false);
+        streak = Array(8).fill(0);
+        ratios = Array(8).fill(0);
+        frames = 0;
+      }
+      function paint(preview) {
+        ctx.clearRect(0, 0, 640, 480);
+        zones.forEach((z, i) => {
+          ctx.strokeStyle = running
+            ? states[i]
+              ? "#ff947e"
+              : "#57e2c1"
+            : "#bca6ff";
+          ctx.lineWidth = 3;
+          ctx.strokeRect(z.x * 640, z.y * 480, z.w * 640, z.h * 480);
+          ctx.fillStyle = "#0d1121dd";
+          ctx.fillRect(z.x * 640, z.y * 480, 110, 24);
+          ctx.fillStyle = "#fff";
+          ctx.font = "14px Arial";
+          ctx.fillText(
+            "A0" +
+              (i + 1) +
+              (running ? " " + Math.round(ratios[i] * 100) + "%" : ""),
+            z.x * 640 + 5,
+            z.y * 480 + 17,
+          );
+        });
+        if (preview) {
+          ctx.strokeStyle = "#fff";
+          ctx.strokeRect(
+            preview.x * 640,
+            preview.y * 480,
+            preview.w * 640,
+            preview.h * 480,
+          );
+        }
+      }
+      async function post(path, data) {
+        let r = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (!r.ok) throw Error("Sensor agent rejected the request");
+        return r.json();
+      }
+      function cameraMessage(t) {
+        $("cameraStatus").textContent = t;
+      }
+      async function choose(mode) {
+        try {
+          running = false;
+          const d = await post("/api/mode", { mode });
+          token = d.token;
+          $("simulationPanel").classList.toggle(
+            "hidden",
+            mode !== "simulation",
+          );
+          $("cameraPanel").classList.toggle("hidden", mode !== "camera");
+          if (mode === "simulation" && stream) {
+            stream.getTracks().forEach((t) => t.stop());
+            stream = null;
+            baseline = null;
+          }
+          cameraMessage(
+            "Enable the camera, position your layout, then capture an empty reference.",
+          );
+        } catch (e) {
+          $("status").textContent = e.message;
+        }
+      }
+      $("simulation").onclick = () => choose("simulation");
+      $("camera").onclick = () => choose("camera");
+      $("pause").onclick = () =>
+        post("/api/pause", {}).catch(
+          (e) => ($("status").textContent = e.message),
+        );
+      $("enable").onclick = async () => {
+        try {
+          if (!navigator.mediaDevices)
+            throw Error(
+              "Use http://127.0.0.1:8091 on this laptop to enable camera access.",
+            );
+          if (stream) stream.getTracks().forEach((t) => t.stop());
+          invalidate();
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 640, height: 480 },
+            audio: false,
+          });
+          video.srcObject = stream;
+          await video.play();
+          stream.getVideoTracks()[0].onended = () => {
+            invalidate();
+            cameraMessage(
+              "Camera disconnected. Reconnect and capture a new empty reference.",
+            );
+          };
+          cameraMessage(
+            "Camera ready. Keep all zones empty and capture the reference.",
+          );
+        } catch (e) {
+          cameraMessage(e.name + ": " + e.message);
+        }
+      };
+      $("grid").onclick = () => {
+        drawing = false;
+        defaults();
+        cameraMessage("Grid restored. Capture a new empty reference.");
+      };
+      $("clear").onclick = () => {
+        zones = [];
+        drawing = true;
+        invalidate();
+        paint();
+        cameraMessage(
+          "Drag eight rectangles around empty slots in A01–A08 order.",
+        );
+      };
+      function point(e) {
+        let r = overlay.getBoundingClientRect();
+        return {
+          x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)),
+          y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)),
+        };
+      }
+      function rect(a, b) {
+        return {
+          x: Math.min(a.x, b.x),
+          y: Math.min(a.y, b.y),
+          w: Math.abs(a.x - b.x),
+          h: Math.abs(a.y - b.y),
+        };
+      }
+      overlay.onpointerdown = (e) => {
+        if (!drawing || zones.length >= 8) return;
+        startPoint = point(e);
+        overlay.setPointerCapture(e.pointerId);
+      };
+      overlay.onpointermove = (e) => {
+        if (startPoint) paint(rect(startPoint, point(e)));
+      };
+      overlay.onpointerup = (e) => {
+        if (!startPoint) return;
+        let z = rect(startPoint, point(e));
+        startPoint = null;
+        if (z.w > 0.03 && z.h > 0.03) zones.push(z);
+        paint();
+        cameraMessage(
+          zones.length === 8
+            ? "Eight zones ready. Capture an empty reference."
+            : `Zones drawn: ${zones.length}/8`,
+        );
+      };
+      $("calibrate").onclick = () => {
+        if (!stream || video.readyState < 2 || zones.length !== 8) {
+          cameraMessage(
+            "Enable the camera and define exactly eight zones first.",
+          );
+          return;
+        }
+        invalidate();
+        sx.drawImage(video, 0, 0, 320, 240);
+        baseline = new Uint8ClampedArray(sx.getImageData(0, 0, 320, 240).data);
+        cameraMessage(
+          "Empty reference saved. Start detection, then place a vehicle in a slot.",
+        );
+        paint();
+      };
+      $("detect").onclick = () => {
+        if (!baseline || !stream || !token) {
+          cameraMessage(
+            "Choose Camera detection, enable the camera and capture an empty reference first.",
+          );
+          return;
+        }
+        running = true;
+        frames = 0;
+        lastPost = 0;
+        lastVideo = -1;
+        lastFrameAt = performance.now();
+        cameraMessage(
+          "Automatic detection running. No manual occupancy clicks needed.",
+        );
+      };
+      $("stop").onclick = () => {
+        running = false;
+        cameraMessage(
+          "Detection stopped. The server will expire the last readings.",
+        );
+      };
+      $("threshold").oninput = () => {
+        $("thresholdValue").textContent = $("threshold").value + "%";
+      };
+      async function tick() {
+        if (processing) return;
+        processing = true;
+        try {
+          if (
+            running &&
+            !document.hidden &&
+            stream &&
+            stream.getVideoTracks()[0].readyState === "live" &&
+            video.readyState >= 2
+          ) {
+            const now = performance.now();
+            if (video.currentTime !== lastVideo) {
+              lastVideo = video.currentTime;
+              lastFrameAt = now;
+              sx.drawImage(video, 0, 0, 320, 240);
+              ratios = ParkingVision.scores(
+                sx.getImageData(0, 0, 320, 240).data,
+                baseline,
+                320,
+                240,
+                zones,
+              );
+              states = ParkingVision.stabilize(
+                states,
+                candidate,
+                streak,
+                ratios,
+                Number($("threshold").value) / 100,
+              );
+              frames++;
+              paint();
+              if (frames >= 4 && now - lastPost >= 500) {
+                await post("/api/camera", {
+                  token,
+                  slots: Object.fromEntries(
+                    states.map((s, i) => ["A0" + (i + 1), s]),
+                  ),
+                });
+                lastPost = now;
+              }
+            } else if (now - lastFrameAt > 1500) {
+              cameraMessage("Camera frames stopped. Fresh reports are paused.");
+            }
+          }
+        } catch (e) {
+          running = false;
+          cameraMessage("Detection paused: " + e.message);
+        } finally {
+          processing = false;
+        }
+      }
+      setInterval(tick, 200);
+      async function refresh() {
+        try {
+          let r = await fetch("/api/state");
+          if (!r.ok) throw Error();
+          let d = await r.json();
+          $("mode").textContent =
+            d.mode === "camera" ? "CAMERA DETECTION" : "AUTOMATIC SIMULATION";
+          $("status").textContent = d.status;
+          $("cycle").textContent = d.cycle + " / 80 s";
+          $("pause").textContent = d.paused
+            ? "Resume transmission"
+            : "Pause transmission";
+          if (d.mode === "simulation" && running) running = false;
+        } catch (e) {
+          $("status").textContent = "Sensor agent unavailable";
+        } finally {
+          setTimeout(refresh, 1000);
+        }
+      }
+      defaults();
+      refresh();
+    </script>
+  </body>
+</html>
